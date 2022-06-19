@@ -1,63 +1,37 @@
 package kr.co.company.hw3;
 
-import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
-import android.app.NotificationManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
-import android.media.Image;
-import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
-import android.os.Message;
-import android.os.RemoteException;
+import android.os.Looper;
 import android.util.Log;
 import android.view.View;
-import android.widget.Button;
 import android.widget.ImageView;
-import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
-import android.widget.Toast;
 
-import java.util.ArrayList;
-import java.util.List;
+import static kr.co.company.hw3.Actions.*;
 
 public class PlayMusicActivity extends AppCompatActivity {
-//    public static String MainActivity_ACTION = "kr.co.company.hw3.foreground.action.main";
-    public static final String PREFIX = "kr.co.company.hw3.foregroundservice.action.";
-    public static final String MIAN_ACTION = PREFIX+"main";
-    public static final String PLAY_ACTION = PREFIX + "play";
-    public static final String PAUSE_ACTION = PREFIX + "pause";
-    public static final String NEXTPLAY_ACTION = PREFIX + "next";
-    public static final String STARTFORGROUND_ACTION = PREFIX + "startforeground";
-    public static final String STOPFOREGROUND_ACTION = PREFIX + "stopforeground";
-    public static final String SEEKTO_ACTION = PREFIX + "seekTo";
-
-    List<Music> mData = null;
-//    MediaPlayer mediaPlayer = null;
+    SingleMediaPlayer mediaPlayer = null;
     SeekBar mProgress;
     TextView titleView;
     TextView duration;
     ImageView albumImg;
     ImageView playOrPause;
-    ProgressHandler mProgressHandler;
+    Handler mProgressHandler;
     boolean mIsBound = false;
-    boolean flagPlay = false;
-    int mIdx;
-    int totalDuration;
-
-    int NOTIFICATION_ID=1;
 
     @RequiresApi(api = Build.VERSION_CODES.Q)
     @Override
@@ -67,42 +41,46 @@ public class PlayMusicActivity extends AppCompatActivity {
         Intent intent = this.getIntent();
 
         int position = intent.getIntExtra("position",-1);
+        Log.i("OnCreate", position + "");
+        if(position != -1) {
+            mediaPlayer = (SingleMediaPlayer) SingleMediaPlayer.getSingleMediaPlayer(position);
+            if (position != mediaPlayer.getPosition())
+                mediaPlayer.loadMedia(position);
+        }
         if(mBinder!=null){
             try {
-                position = mBinder.getPosition();
+                position=mediaPlayer.getPosition();
                 Log.d("tag2", position + "");
             }catch (Exception e){e.printStackTrace();}
         }
         Log.d("tag", position + "");
-        mIdx = position;
 
         titleView = (TextView) findViewById(R.id.title);
         albumImg = findViewById(R.id.albumCover);
         duration = (TextView) findViewById(R.id.progressText);
         playOrPause = (ImageView) findViewById(R.id.playOrPause);
-//        mediaPlayer= SingleMediaPlayer.getMediaPlayer();
-//        mediaPlayer.setOnCompletionListener(mOnComplete);
-//        mediaPlayer.setOnSeekCompleteListener(mOnSeekComplete);
 
         mProgress = (SeekBar) findViewById(R.id.progressBar);
         mProgress.setOnSeekBarChangeListener(mOnSeek);
-        mProgressHandler = new ProgressHandler(this,position);
-        mProgressHandler.sendEmptyMessageDelayed(0,800);
+        mProgressHandler=new Handler(Looper.getMainLooper());
+        mProgressHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                updateProgress();
+                mProgressHandler.postDelayed(this, 800);
+            }
+        }, 800);
 
-//        if(!LoadMedia(position)){
-//            finish();
-//        }
-//        else {
-        LoadMedia(position);
-            LocalBroadcastManager.getInstance(this).registerReceiver(mBroadcastReceiver, new IntentFilter("music player"));
+        loadMedia(position);
+        LocalBroadcastManager.getInstance(this).registerReceiver(mBroadcastReceiver, new IntentFilter("music player"));
 
-            doBindService();
-            if (mIsBound)
-                sendNotification(this, STARTFORGROUND_ACTION, position);
-//        }
+        doBindService();
+        if (mIsBound)
+            sendNotification(this, STARTFORGROUND_ACTION.toString(), position);
     }
+
     private IMusicService mBinder = null;
-    private ServiceConnection mConnection = new ServiceConnection() {
+    private final ServiceConnection mConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             mBinder = IMusicService.Stub.asInterface(service);
@@ -121,50 +99,46 @@ public class PlayMusicActivity extends AppCompatActivity {
     }
 
     public void initMediaPlayerPosition(){
-        Intent intent = getIntent();
-        int currentPosition = intent.getIntExtra("current_position",-1);
-        Log.d("tag", "onResume currentPosition "+ currentPosition);
-
-        if(currentPosition!=-1){
-            flagPlay = intent.getBooleanExtra("is_playing",false);
-            Log.d("tag", "onResume "+ currentPosition+" "+flagPlay);
-            mProgress.setProgress(currentPosition);
-            setDuration(totalDuration, currentPosition);
-            int position = intent.getIntExtra("position",-1);
-            if(position==-1){
-                Log.d("tag", "onResume error playing music");
-                return;
-            }
-            Log.d("tag", "onResume paused music");
-            if(!flagPlay) {
-                sendNotification(this, PAUSE_ACTION, position,currentPosition);
+        if(mediaPlayer.getCurrentPosition()>0){
+            mProgress.setProgress(mediaPlayer.getCurrentPosition());
+            setDuration(mediaPlayer.getDuration(), mediaPlayer.getCurrentPosition());
+            if(!mediaPlayer.isPlaying()) {
+                mediaPlayer.pause();
+                sendNotification(this, PAUSE_ACTION.toString(), mediaPlayer.getPosition());
             }
             else {
-                sendNotification(this, PLAY_ACTION,position,currentPosition);
+                mediaPlayer.start();
+                sendNotification(this, PLAY_ACTION.toString(),mediaPlayer.getPosition());
             }
         }
     }
     public void onClickStart(View v){
-        if (!flagPlay) {
-            flagPlay=true;
+        if (!mediaPlayer.isPlaying()) {
             playOrPause.setImageResource(R.drawable.pause);
-
-            Log.d("onclick",mIdx+"");
-            sendNotification(this,PLAY_ACTION,mIdx);
+            mediaPlayer.start();
+            Log.d("onclick start",mediaPlayer.getPosition()+"");
+            sendNotification(this,PLAY_ACTION.toString(),mediaPlayer.getPosition());
         }
         else{
             playOrPause.setImageResource(R.drawable.play);
-            flagPlay=false;
-            sendNotification(this,PAUSE_ACTION,mIdx);
+            mediaPlayer.pause();
+            Log.d("onclick pause",mediaPlayer.getPosition()+"");
+            sendNotification(this,PAUSE_ACTION.toString(),mediaPlayer.getPosition());
         }
+    }
+    public void onClickNect(View v){
+        sendNotification(this, NEXTPLAY_ACTION.toString(), mediaPlayer.getPosition());
+    }
+    public void onClickPre(View v){
+        sendNotification(this, PREPLAY_ACTION.toString(),mediaPlayer.getPosition());
     }
 
     public void onDestroy() {
         super.onDestroy();
-//        if (mediaPlayer!=null){
-//            mediaPlayer.release();
-//            mediaPlayer =null;
-//        }
+        if (mediaPlayer!=null){
+            mediaPlayer.release();
+            mediaPlayer =null;
+        }
         mProgressHandler.removeMessages(0);
         LocalBroadcastManager.getInstance(this).unregisterReceiver(mBroadcastReceiver);
         if(mIsBound){
@@ -173,7 +147,7 @@ public class PlayMusicActivity extends AppCompatActivity {
     }
 
     public void doBindService() {
-        mIsBound =bindService(new Intent(this, MusicService.class),
+        mIsBound = bindService(new Intent(this, MusicService.class),
                 mConnection, Context.BIND_AUTO_CREATE);
     }
 
@@ -183,66 +157,18 @@ public class PlayMusicActivity extends AppCompatActivity {
         intent.putExtra("position", position);
         startService(intent);
     }
-    public void sendNotification(AppCompatActivity app,String action,int position,int currentPositon) {
-        Intent intent = new Intent(app, MusicService.class);
-        intent.setAction(action);
-        intent.putExtra("position", position);
-        intent.putExtra("current_position", currentPositon);
-        startService(intent);
-    }
-    boolean LoadMedia(int idx){
-        MusicData musicData = new MusicData();
-        mData = musicData.getMusics();
-        Music music = mData.get(idx);
-//        try{
-//            mediaPlayer.setDataSource(music.getPath());
-//        }catch (Exception e){
-//            e.printStackTrace();
-//            return false;
-//        }
-//        if(!PrePare())
-//            return false;
-        titleView.setText(music.getTitle());
-        albumImg.setImageBitmap(music.getAlbumArt());
-        totalDuration = music.getDuration();
-        mProgress.setMax(totalDuration);
-        setDuration(music.getDuration(),0);
-        return true;
-    }
-//    boolean PrePare(){
-//        try{
-//            mediaPlayer.prepare();
-//        }catch (Exception e){
-//            e.printStackTrace();
-//            return false;
-//        }
-//        return true;
-//    }
-//    MediaPlayer.OnCompletionListener mOnComplete = new MediaPlayer.OnCompletionListener() {
-//        @Override
-//        public void onCompletion(MediaPlayer mp) {
-//            mIdx = (mIdx==mData.size()-1?0:mIdx+1);
-//            mediaPlayer.reset();
-//            LoadMedia(mIdx);
-//            mediaPlayer.start();
-//        }
-//    };
 
     SeekBar.OnSeekBarChangeListener mOnSeek= new SeekBar.OnSeekBarChangeListener() {
         @Override
         public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
             if(fromUser){
-                setDuration(totalDuration, progress);
-                sendNotification(PlayMusicActivity.this,SEEKTO_ACTION,progress);
+                setDuration(mediaPlayer.getDuration(), progress);
+                mediaPlayer.seekTo(progress);
             }
         }
 
         @Override
         public void onStartTrackingTouch(SeekBar seekBar) {
-//            flagPlay = mediaPlayer.isPlaying();
-//            if(flagPlay)
-//                mediaPlayer.pause();
-//                sendNotification(this,PAUSE_ACTION,mIdx,currentPosition);
         }
 
         @Override
@@ -258,15 +184,18 @@ public class PlayMusicActivity extends AppCompatActivity {
         return minutes +":"+seconds;
     }
     public void setDuration (long d, long c){
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                duration.setText(convertDuration(c)+"/"+convertDuration(d));
-            }
-        });
+        runOnUiThread(() -> duration.setText(String.format("%s/%s", convertDuration(c), convertDuration(d))));
     }
-
-    private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
+    @RequiresApi(api = Build.VERSION_CODES.Q)
+    void loadMedia(int idx){
+        MusicData musicData = new MusicData();
+        Music music = musicData.getMusics().get(idx);
+        titleView.setText(music.getTitle());
+        albumImg.setImageBitmap(music.getAlbumArt());
+        mProgress.setMax(music.getDuration());
+        setDuration(music.getDuration(),0);
+    }
+    private final BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             Log.d("tag",intent.getStringExtra("state")+" "+ intent.getAction());
@@ -278,50 +207,34 @@ public class PlayMusicActivity extends AppCompatActivity {
                 case "play" :
                     playOrPause.setImageResource(R.drawable.pause);
                     break;
-                case "progress":
-                    int currentPosition = intent.getIntExtra("current_position",-1);
-                    if(currentPosition==-1){
-                        Log.d("tag", "broadcast receiver에서 오류 발생");
-                        return;
-                    }
-                    Log.d("tag", convertDuration(currentPosition)+" "+flagPlay);
-
-                    flagPlay = intent.getBooleanExtra("is_playing",false);
-                    if(flagPlay){
-                        mProgress.setProgress(currentPosition);
-                        setDuration(totalDuration, currentPosition);
-                    }
+                case "close" :
+                    finish();
+                case "next" :
+                case "pre":
+                    playOrPause.setImageResource(R.drawable.play);
+                    albumImg.setImageBitmap(mediaPlayer.getMusic().getAlbumArt());
+                    titleView.setText(mediaPlayer.getMusic().getTitle());
+                    mProgress.setProgress(mediaPlayer.getCurrentPosition());
+                    mProgress.setMax(mediaPlayer.getDuration());
+                    setDuration(mediaPlayer.getDuration(),0);
                     break;
             }
         }
     };
-}
-
-class ProgressHandler extends Handler{
-    public static final String PREFIX = "kr.co.company.hw3.foregroundservice.action.";
-    public static final String PROGRESS_ACTION = PREFIX + "progress";
-
-    AppCompatActivity app;
-    int position;
-
-    public ProgressHandler(AppCompatActivity app, int position){
-        this.app = app;
-        this.position =position;
-    }
-
-    @Override
-    public void handleMessage(@NonNull Message msg){
-        super.handleMessage(msg);
+    private void updateProgress() {
         try{
-            sendNotification(app, PROGRESS_ACTION, position);
-        }catch (Exception e){e.printStackTrace();}
-        this.sendEmptyMessageDelayed(0,200);
-    }
+            if(mediaPlayer.isPlaying()){
+//                Log.i("currentPosition", "current : "+mediaPlayer.getCurrentPosition());
+                mProgress.setProgress(mediaPlayer.getCurrentPosition());
+                if(mediaPlayer.getCurrentPosition()==0 || mediaPlayer.getCurrentPosition()<800){
+                    runOnUiThread(() -> {
+                        ImageView albumImage =findViewById(R.id.albumCover);
+                        albumImage.setImageBitmap(mediaPlayer.getMusic().getAlbumArt());
+                    });
+                }
+                runOnUiThread(() -> duration.setText(String.format("%s/%s", convertDuration(mediaPlayer.getCurrentPosition()), convertDuration(mediaPlayer.getDuration()))));
+            }
 
-    public void sendNotification(AppCompatActivity app,String action,int position) {
-        Intent intent = new Intent(app, MusicService.class);
-        intent.setAction(action);
-        intent.putExtra("position", position);
-        app.startService(intent);
+        }catch (Exception e){e.printStackTrace();}
     }
 }
