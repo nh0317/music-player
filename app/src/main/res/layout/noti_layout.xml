@@ -4,11 +4,6 @@
     android:layout_height="wrap_content"
     android:padding="10dp"
     >
-<!--    <RelativeLayout-->
-<!--        android:layout_width="wrap_content"-->
-<!--        android:layout_height="wrap_content"-->
-<!--        android:layout_centerHorizontal="true"-->
-<!--        >-->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -64,5 +59,4 @@
     </LinearLayout>
     </LinearLayout>
     </LinearLayout>
-<!--    </RelativeLayout>-->
 </RelativeLayout>
